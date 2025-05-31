@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+import random
 from typing import Callable, Generator
 import qiskit
 from qiskit.circuit import Parameter, QuantumCircuit
@@ -70,14 +71,30 @@ def create_qiskit_QC(
 initial_circuit = []
 
 
-optimal_quantum_circuits = [[] for _ in range(K)]
+optimal_quantum_circuits = [([], 1000000000) for _ in range(K)]
 
-for combination in gate_combinations(QUBITS):
-    print(combination)
-    print(create_qiskit_QC([combination])([], []))
+for i in range(L_MAX):
+    new_circs = []
+    for circ, _bic_score in optimal_quantum_circuits:
+        for combination in gate_combinations(QUBITS):
+            new_circ = circ + [combination]
+            # TODO: compute quantum kernel
 
-# for i in range(L_MAX):
-#     for circ in optimal_quantum_circuits:
-#         for combination in gate_combinations(QUBITS):
-#             print(combination)
-#             print(create_qiskit_QC([combination])([], []))
+            # TODO: train an SVM model
+
+            # TODO: convert outputs to probabilistic predictions
+
+            # TODO: calculate BIC with validation set
+            bic_score = 0
+
+            new_circs.append((new_circ, bic_score))
+
+    # TODO: use the comment instead of shuffle once bic_score is fixed
+    random.shuffle(new_circs)
+    # new_circs.sort(key=lambda entry: entry[1])
+    optimal_quantum_circuits = new_circs[:K]
+
+    # print currently optimal circuits
+    for circ in optimal_quantum_circuits:
+        print(circ)
+        print(create_qiskit_QC(circ[0])([], []))

@@ -25,6 +25,7 @@
             setuptools
             wheel
             venvShellHook
+            pkgs.jupyter
           ];
           venvDir = ".venv";
           src = null;

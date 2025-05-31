@@ -1,8 +1,21 @@
 #!/usr/bin/env python
-import random
-from typing import Callable, Generator
-import qiskit
-from qiskit.circuit import Parameter, QuantumCircuit
+from typing import Callable
+import numpy as np
+import pennylane as qml
+from pennylane import numpy as np
+from sklearn.svm import SVC
+from sklearn.metrics import log_loss
+from itertools import product, combinations
+import copy
+from skopt import gp_minimize
+from skopt.space import Real
+from tqdm.notebook import tqdm
+import time
+import matplotlib.pyplot as plt
+from termcolor import colored
+from qiskit_machine_learning.datasets import ad_hoc_data
+from sklearn.utils import shuffle
+from scipy.special import expit
 
 K = 20
 M = 20
@@ -29,72 +42,64 @@ def gate_combinations(qubits: int):
                     yield combination + [offset + 2]
 
 
-def create_qiskit_QC(
+def create_pennylane_circuit(
     instructions: list[list[int]],
-) -> Callable[[list[int], list[int]], QuantumCircuit]:
+):
     qubits = len(instructions[0])
+    dev = qml.device("default.qubit", wires=qubits)
 
-    xparams = [Parameter(f"x-{i}") for i in range(qubits)]
+    @qml.qnode(dev)
+    def circuit(xparams=[], yparams=[]):
+        for qbit in range(qubits):
+            qml.H(wires=qbit)
+            qml.RX(xparams[qbit], wires=qbit)
 
-    qc = qiskit.QuantumCircuit(qiskit.QuantumRegister(qubits))
-    qc.h([i for i in range(qubits)])
-    for qbit in range(qubits):
-        qc.rx(xparams[qbit], qbit)
+        idx = 0
+        for layer in instructions:
+            for qbit, operation in enumerate(layer):
+                if operation == 0:
+                    pass
+                elif operation == 1:
+                    qml.H(wires=qbit)
+                elif operation == 2:
+                    qml.RZ(yparams[idx], wires=qbit)
+                    idx += 1
+                elif operation >= 3:
+                    qml.CNOT(wires=[qbit, qbit - operation + 2])
 
-    iparams = []
-
-    for layer in instructions:
-        for qubit, operation in enumerate(layer):
-            if operation == 0:
-                pass
-            if operation == 1:
-                qc.h(qubit)
-            if operation == 2:
-                iparams.append(Parameter(f"instr-{len(iparams)}"))
-                qc.rz(iparams[-1], qubit)
-            if operation == 3:
-                qc.cx(qubit, qubit - 1)
-            if operation == 4:
-                qc.cx(qubit, qubit - 2)
-            if operation == 5:
-                qc.cx(qubit, qubit - 3)
-
-    def filled_qc(values: list[int], parameters: list[int]):
-        return qc.assign_parameters(
-            {f"x-{i}": val for i, val in enumerate(values)}
-        ).assign_parameters({f"instr-{i}": val for i, val in enumerate(parameters)})
-
-    return filled_qc
+    return circuit
 
 
 # the circuit from fig 1 from the paper
 initial_circuit = []
 
 
-optimal_quantum_circuits = [([], 1000000000) for _ in range(K)]
+optimal_quantum_circuits = [([], 0)]
+
+for circ in gate_combinations(QUBITS):
+    print(circ)
+    xparams = [0 for _ in range(1000)]
+    yparams = [0 for _ in range(1000)]
+    drawer = qml.draw(create_pennylane_circuit([circ]))
+    print(drawer(xparams, yparams))
+
+exit()
 
 for i in range(L_MAX):
     new_circs = []
     for circ, _bic_score in optimal_quantum_circuits:
         for combination in gate_combinations(QUBITS):
             new_circ = circ + [combination]
-            # TODO: compute quantum kernel
 
-            # TODO: train an SVM model
-
-            # TODO: convert outputs to probabilistic predictions
-
-            # TODO: calculate BIC with validation set
-            bic_score = 0
+            # Compute BIC
+            bic_score = compute_bic(probs, y_val, num_params)
 
             new_circs.append((new_circ, bic_score))
 
-    # TODO: use the comment instead of shuffle once bic_score is fixed
-    random.shuffle(new_circs)
-    # new_circs.sort(key=lambda entry: entry[1])
+    new_circs.sort(key=lambda entry: entry[1])
     optimal_quantum_circuits = new_circs[:K]
 
     # print currently optimal circuits
     for circ in optimal_quantum_circuits:
         print(circ)
-        print(create_qiskit_QC(circ[0])([], []))
+        print(create_pennylane_circuit(circ[0])([], []))

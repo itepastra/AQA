@@ -218,7 +218,7 @@ for depth in tqdm(range(1, L_MAX + 1), desc="Depth", position=3, leave=False):
         circ, init_rz, aic, bic, acc, class_accs, f1, model1 = values
         num_rz = len(init_rz)
         if num_rz == 0:
-            return (circ, [], aic, bic, model1)
+            return (circ, [], aic, bic, acc, class_accs, f1, model1)
 
         def objective(params):
             try:

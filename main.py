@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+import itertools
 import numpy as np
 from typing import List
 import pennylane as qml
@@ -23,24 +24,27 @@ K = 20  # Top circuits to keep per iteration
 M = 20  # Number of circuits to optimize parameters from top K
 N = 100  # Data size
 L_MAX = 2  # Max circuit depth
-QUBITS = 2  # Number of qubits
+QUBITS = 3  # Number of qubits
 seed = 42
 
 matplotlib.use("TkAgg")
+# %matplotlib inline  # Only works inside a Jupyter cell
+projector = np.zeros((2**QUBITS, 2**QUBITS))
+projector[0, 0] = 1
 
 random.seed(seed)
 
 
-def gate_combinations(qubits: int, previous_layer: list[int]):
+def gate_combinations(qubits: int, previous_layer: tuple[int]):
     if qubits == 0:
-        yield []
+        yield ()
     else:
         for combination in gate_combinations(qubits - 1, previous_layer):
-            yield combination + [0]
+            yield combination + (0,)
             if previous_layer[qubits - 1] != 1:
-                yield combination + [1]
+                yield combination + (1,)
             if previous_layer[qubits - 1] != 2:
-                yield combination + [2]
+                yield combination + (2,)
             for offset in range(1, len(combination) + 1):
                 if (
                     combination[-offset] == 0
@@ -49,7 +53,7 @@ def gate_combinations(qubits: int, previous_layer: list[int]):
                     )
                     and previous_layer[qubits - 1] != offset + 2
                 ):
-                    yield combination + [offset + 2]
+                    yield combination + (offset + 2,)
 
 
 def create_pennylane_circuit(instructions: List[List[int]]):
@@ -102,13 +106,15 @@ def build_kernel_fn(gate_layers, rz_params):
     def kernel_qnode(x1, x2):
         apply_circuit(x1)
         qml.adjoint(apply_circuit)(x2)
-        return qml.probs(wires=0)
+        # return qml.probs(wires=0)
+        # return qml.expval(qml.PauliZ(wires=range(QUBITS)))
+        return qml.expval(qml.Hermitian(projector, wires=range(QUBITS)))
 
     def kernel_fn(X1, X2):
         K = np.zeros((len(X1), len(X2)))
         for i in range(len(X1)):
             for j in range(len(X2)):
-                K[i, j] = kernel_qnode(X1[i], X2[j])[0]
+                K[i, j] = kernel_qnode(X1[i], X2[j])
         return K
 
     return kernel_fn
@@ -151,60 +157,59 @@ for depth in tqdm(range(1, L_MAX + 1), desc="Depth", position=3, leave=False):
     base_circuits = (
         [(c[0], c[1]) for c in optimal_circuits]
         if optimal_circuits
-        else [([[0 for _ in range(QUBITS)]], [])]
+        else [([tuple(0 for _ in range(QUBITS))], [])]
+    )
+
+    # Stage 1: Structure search (fixed/random RZ)
+    def calculate_combo(inp):
+        base, base_rz, combo = inp
+        new_circ = base + [combo]
+        num_rz = sum(layer.count(2) for layer in new_circ)
+        # print(f"Trying circuit {new_circ} with {num_rz} RZs")
+        new_rz_count = combo.count(2)
+        new_rz = np.random.uniform(-np.pi, np.pi, size=new_rz_count).tolist()
+        dummy_rz = base_rz + new_rz
+
+        try:
+            kernel_fn = build_kernel_fn(new_circ, dummy_rz)
+            K_train = kernel_fn(x_train, x_train)
+            model = SVC(kernel="precomputed", probability=True)
+            model.fit(K_train, y_train)
+
+            K_val = kernel_fn(x_val, x_train)
+            y_prob = model.predict_proba(K_val)[:, 1]
+
+            aic, bic, acc, class_accs, f1 = compute_information_criteria(
+                y_val, y_prob, num_rz
+            )
+            print(f"combo {combo} has BIC {bic}")
+            return (new_circ, dummy_rz, aic, bic, acc, class_accs, f1, model)
+        except Exception as e:
+            print(f"Structure error: {e}")
+            return None
+
+    result = pqdm(
+        [
+            (base, rz, combo)
+            for base, rz in base_circuits
+            for combo in gate_combinations(QUBITS, base[-1])
+        ],
+        calculate_combo,
+        n_jobs=20,
+        desc="Gate Combinations",
+        position=1,
+        leave=False,
     )
     stage1_candidates = []
-    # Stage 1: Structure search (fixed/random RZ)
-    for base, base_rz in tqdm(
-        base_circuits,
-        desc=f"Structure search, depth {depth}",
-        position=2,
-        leave=False,
-    ):
+    for thing in result:
+        print(f"{thing}, ({type(thing)})")
+        stage1_candidates.append(thing)
 
-        def calculate_combo(combo):
-            new_circ = base + [combo]
-            num_rz = sum(layer.count(2) for layer in new_circ)
-            # print(f"Trying circuit {new_circ} with {num_rz} RZs")
-            new_rz_count = combo.count(2)
-            new_rz = np.random.uniform(-np.pi, np.pi, size=new_rz_count).tolist()
-            dummy_rz = base_rz + new_rz
-
-            try:
-                kernel_fn = build_kernel_fn(new_circ, dummy_rz)
-                K_train = kernel_fn(x_train, x_train)
-                model = SVC(kernel="precomputed", probability=True)
-                model.fit(K_train, y_train)
-
-                K_val = kernel_fn(x_val, x_train)
-                y_prob = model.predict_proba(K_val)[:, 1]
-
-                aic, bic, acc, class_accs, f1 = compute_information_criteria(
-                    y_val, y_prob, num_rz
-                )
-                print(f"{combo} has a bic of {bic}")
-                return (new_circ, dummy_rz, aic, bic, acc, class_accs, f1, model)
-            except Exception as e:
-                print(f"Structure error: {e}")
-                return None
-
-        result = pqdm(
-            list(gate_combinations(QUBITS, base[-1])),
-            calculate_combo,
-            n_jobs=20,
-            desc="Gate Combinations",
-            position=1,
-            leave=False,
-        )
-        for thing in result:
-            if thing is not None:
-                stage1_candidates.append(thing)
-
+    print(stage1_candidates)
     # Pick top K by BIC
     stage1_candidates.sort(key=lambda x: x[3])
     # top_k = stage1_candidates[:K]
-    param_circuits = [item for item in stage1_candidates if len(item[1]) > 0]
-    unparam_circuits = [item for item in stage1_candidates if len(item[1]) == 0]
+    param_circuits = [item for item in stage1_candidates]
     # top_m = param_circuits[:M]
     # Stage 2: Parameter optimization on top M circuits
     stage2_optimized = []
@@ -213,7 +218,7 @@ for depth in tqdm(range(1, L_MAX + 1), desc="Depth", position=3, leave=False):
         circ, init_rz, aic, bic, acc, class_accs, f1, model1 = values
         num_rz = len(init_rz)
         if num_rz == 0:
-            return (circ, [], aic1, bic1, model1)
+            return (circ, [], aic, bic, model1)
 
         def objective(params):
             try:
@@ -223,7 +228,9 @@ for depth in tqdm(range(1, L_MAX + 1), desc="Depth", position=3, leave=False):
                 model.fit(K_train, y_train)
                 K_val = kernel_fn(x_val, x_train)
                 y_prob = model.predict_proba(K_val)[:, 1]
-                _, bic = compute_information_criteria(y_val, y_prob, num_rz)
+                aic, bic, acc, class_accs, f1 = compute_information_criteria(
+                    y_val, y_prob, num_rz
+                )
                 return bic
             except Exception:
                 return 1e6
@@ -244,6 +251,7 @@ for depth in tqdm(range(1, L_MAX + 1), desc="Depth", position=3, leave=False):
             aic, bic, acc, class_accs, f1 = compute_information_criteria(
                 y_val, y_prob, num_rz
             )
+            print(f"optimised {circ}")
             return (circ, best_params, aic, bic, acc, class_accs, f1, model)
 
         except Exception as e:
@@ -264,7 +272,8 @@ for depth in tqdm(range(1, L_MAX + 1), desc="Depth", position=3, leave=False):
     ]
 
     # Add remaining K-M circuits (unoptimized) + optimized ones
-    optimal_circuits = stage2_optimized + param_circuits[M:] + unparam_circuits
+    optimal_circuits = stage2_optimized
+    print(optimal_circuits)
     optimal_circuits.sort(key=lambda x: x[3])  # sort by BIC
     optimal_circuits = optimal_circuits[:K]  # keep top K
 
@@ -300,7 +309,7 @@ plt.tight_layout()
 
 if x.shape[1] == 2:
     plt.figure(figsize=(6, 5))
-    sns.scatterplot(x=X[:, 0], y=X[:, 1], hue=y, palette="Set1")
+    sns.scatterplot(x=x[:, 0], y=x[:, 1], hue=y, palette="Set1")
     plt.title("2D Scatter Plot by Class")
     plt.xlabel("x0")
     plt.ylabel("x1")

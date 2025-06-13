@@ -23,7 +23,7 @@ from pqdm.processes import pqdm
 
 K = 20  # Top circuits to keep per iteration
 N = 100  # Data size
-L_MAX = 4  # Max circuit depth
+L_MAX = 5  # Max circuit depth
 QUBITS = 3  # Number of qubits
 JOBS = 20
 seed = 42
@@ -232,7 +232,7 @@ for m in [1, 5, 10, 15, 20]:
         # Pick top K by BIC
         stage1_candidates.sort(key=lambda x: x[3])
         # top_k = stage1_candidates[:K]
-        param_circuits = [item for item in stage1_candidates]
+        param_circuits = stage1_candidates
         # top_m = param_circuits[:M]
         # Stage 2: Parameter optimization on top M circuits
         stage2_optimized = []
@@ -292,7 +292,7 @@ for m in [1, 5, 10, 15, 20]:
         ]
 
         # Add remaining K-M circuits (unoptimized) + optimized ones
-        optimal_circuits = stage2_optimized
+        optimal_circuits = stage2_optimized + stage1_candidates[m:K]
         optimal_circuits.sort(key=lambda x: x[3])  # sort by BIC
         optimal_circuits = optimal_circuits[:K]  # keep top K
 

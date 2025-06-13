@@ -55,7 +55,7 @@ def gate_combinations_sub(qubits: int, previous_layer: tuple[int]):
 
 def gate_combinations(qubits, previous_layer):
     # skip the 1st output (0 everywhere) so we actually do
-    return list(gate_combinations_sub(qubits, previous_layer))[3:]
+    return list(gate_combinations_sub(qubits, previous_layer))[1:]
 
 
 def create_pennylane_circuit(instructions: List[List[int]]):

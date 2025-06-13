@@ -21,23 +21,22 @@ import pandas as pd
 from collections import Counter
 from pqdm.processes import pqdm
 
-K = 20  # Top circuits to keep per iteration
+K = 5  # Top circuits to keep per iteration
 N = 100  # Data size
 L_MAX = 4  # Max circuit depth
 QUBITS = 3  # Number of qubits
+JOBS = 20
 seed = 42
 
 projector = np.zeros((2**QUBITS, 2**QUBITS))
 projector[0, 0] = 1
 
-random.seed(seed)
 
-
-def gate_combinations(qubits: int, previous_layer: tuple[int]):
+def gate_combinations_sub(qubits: int, previous_layer: tuple[int]):
     if qubits == 0:
         yield ()
     else:
-        for combination in gate_combinations(qubits - 1, previous_layer):
+        for combination in gate_combinations_sub(qubits - 1, previous_layer):
             yield combination + (0,)
             if previous_layer[qubits - 1] != 1:
                 yield combination + (1,)
@@ -54,6 +53,11 @@ def gate_combinations(qubits: int, previous_layer: tuple[int]):
                     yield combination + (offset + 2,)
 
 
+def gate_combinations(qubits, previous_layer):
+    # skip the 1st output (0 everywhere) so we actually do
+    return list(gate_combinations_sub(qubits, previous_layer))[3:]
+
+
 def create_pennylane_circuit(instructions: List[List[int]]):
     dev = qml.device("default.qubit", wires=QUBITS)
 
@@ -61,7 +65,7 @@ def create_pennylane_circuit(instructions: List[List[int]]):
     def circuit(xparams=[], yparams=[]):
         for q in range(QUBITS):
             qml.Hadamard(wires=q)
-            qml.RX(xparams[q], wires=q)
+            qml.RZ(xparams[q], wires=q)
 
         idx = 0
         for layer in instructions:
@@ -82,12 +86,13 @@ def create_pennylane_circuit(instructions: List[List[int]]):
 
 def build_kernel_fn(gate_layers, rz_params):
     dev = qml.device("default.qubit", wires=QUBITS)
+    dev2 = qml.device("default.qubit", wires=QUBITS)
 
     def apply_circuit(x):
         idx = 0
         for q in range(QUBITS):
             qml.Hadamard(wires=q)
-            qml.RX(x[q], wires=q)
+            qml.RZ(x[q], wires=q)
         for layer in gate_layers:
             for qbit, op in enumerate(layer):
                 if op == 0:
@@ -136,17 +141,39 @@ def compute_information_criteria(y_true, y_prob, num_params):
     return aic, bic, acc, class_accuracies, f1
 
 
+gap = 0.3
+
 # Load data
 x_train_raw, y_train_raw, x_test_raw, y_test_raw = ad_hoc_data(
-    training_size=N // 2, test_size=N // 2, n=QUBITS, gap=0.3, one_hot=False
+    training_size=N // 2, test_size=N // 2, n=QUBITS, gap=gap, one_hot=False
+)
+
+X_test, y_test, tempx, tempy = ad_hoc_data(
+    training_size=10 // 2, test_size=0, n=QUBITS, gap=gap, one_hot=False
 )
 
 x = np.vstack([x_train_raw, x_test_raw])
 y = np.hstack([y_train_raw, y_test_raw])
-x, y = shuffle(x, y, random_state=random.randint(1, 10000))
+x, y = shuffle(x, y, random_state=seed)
 x_train, x_val, y_train, y_val = train_test_split(
-    x, y, test_size=0.3, random_state=random.randint(1, 10000)
+    x, y, test_size=0.3, random_state=seed
 )
+
+
+def compute_test_values(circ, rz, model):
+    num_rz = len(rz)
+    try:
+        kernel_fn = build_kernel_fn(circ, rz)
+        K_test = kernel_fn(X_test, x_train)
+        y_prob = model.predict_proba(K_test)[:, 1]
+        aic, bic, acc, class_accs, f1 = compute_information_criteria(
+            y_test, y_prob, num_rz
+        )
+        return acc, bic, acc, class_accs, f1
+    except Exception as e:
+        print(f"Test evaluation error: {e}")
+        return None, None, None, None, None
+
 
 best_circuit_arr = []
 
@@ -194,17 +221,15 @@ for m in [1, 5, 10, 15, 20]:
                 for combo in gate_combinations(QUBITS, base[-1])
             ],
             calculate_combo,
-            n_jobs=20,
+            n_jobs=JOBS,
             desc="Gate Combinations",
             position=1,
             leave=False,
         )
         stage1_candidates = []
         for thing in result:
-            print(f"{thing}, ({type(thing)})")
             stage1_candidates.append(thing)
 
-        print(stage1_candidates)
         # Pick top K by BIC
         stage1_candidates.sort(key=lambda x: x[3])
         # top_k = stage1_candidates[:K]
@@ -235,9 +260,7 @@ for m in [1, 5, 10, 15, 20]:
                     return 1e6
 
             space = [Real(-np.pi, np.pi) for _ in range(num_rz)]
-            result = gp_minimize(
-                objective, space, n_calls=15, random_state=random.randint(0, 10000)
-            )
+            result = gp_minimize(objective, space, n_calls=50, random_state=seed)
             best_params = result.x
 
             try:
@@ -250,7 +273,6 @@ for m in [1, 5, 10, 15, 20]:
                 aic, bic, acc, class_accs, f1 = compute_information_criteria(
                     y_val, y_prob, num_rz
                 )
-                print(f"optimised {circ}")
                 return (circ, best_params, aic, bic, acc, class_accs, f1, model)
 
             except Exception as e:
@@ -260,9 +282,9 @@ for m in [1, 5, 10, 15, 20]:
         stage2_optimized = [
             x
             for x in pqdm(
-                param_circuits[:M],
+                param_circuits[:m],
                 parameter_optimization,
-                n_jobs=20,
+                n_jobs=JOBS,
                 position=2,
                 leave=False,
                 desc="Optimizing parameters",
@@ -272,11 +294,53 @@ for m in [1, 5, 10, 15, 20]:
 
         # Add remaining K-M circuits (unoptimized) + optimized ones
         optimal_circuits = stage2_optimized
-        print(optimal_circuits)
         optimal_circuits.sort(key=lambda x: x[3])  # sort by BIC
         optimal_circuits = optimal_circuits[:K]  # keep top K
 
-        best_circuit_arr.append((m, depth, optimal_circuits[0]))
+        aic, bic, acc, class_accs, f1 = compute_test_values(
+            optimal_circuits[0][0], optimal_circuits[0][1], optimal_circuits[0][7]
+        )
+
+        best_circuit_arr.append(
+            (optimal_circuits[0] + (m, depth) + (aic, bic, acc, class_accs, f1))
+        )
 
         with open("data.json", "w+") as f:
-            json.dump(best_circuit_arr, f)
+            json.dump(
+                [
+                    (
+                        m,
+                        depth,
+                        circ,
+                        best_params,
+                        aic,
+                        bic,
+                        acc,
+                        class_accs,
+                        f1,
+                        aic_test,
+                        bic_test,
+                        acc_test,
+                        class_accs_test,
+                        f1_test,
+                    )
+                    for (
+                        circ,
+                        best_params,
+                        aic,
+                        bic,
+                        acc,
+                        class_accs,
+                        f1,
+                        model,
+                        m,
+                        depth,
+                        aic_test,
+                        bic_test,
+                        acc_test,
+                        class_accs_test,
+                        f1_test,
+                    ) in best_circuit_arr
+                ],
+                f,
+            )

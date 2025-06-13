@@ -21,7 +21,7 @@ import pandas as pd
 from collections import Counter
 from pqdm.processes import pqdm
 
-K = 5  # Top circuits to keep per iteration
+K = 20  # Top circuits to keep per iteration
 N = 100  # Data size
 L_MAX = 4  # Max circuit depth
 QUBITS = 3  # Number of qubits
@@ -142,14 +142,13 @@ def compute_information_criteria(y_true, y_prob, num_params):
 
 
 gap = 0.3
-
 # Load data
 x_train_raw, y_train_raw, x_test_raw, y_test_raw = ad_hoc_data(
     training_size=N // 2, test_size=N // 2, n=QUBITS, gap=gap, one_hot=False
 )
 
 X_test, y_test, tempx, tempy = ad_hoc_data(
-    training_size=10 // 2, test_size=0, n=QUBITS, gap=gap, one_hot=False
+    training_size=4100 // 2, test_size=0, n=QUBITS, gap=gap, one_hot=False
 )
 
 x = np.vstack([x_train_raw, x_test_raw])

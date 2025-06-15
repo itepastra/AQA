@@ -142,20 +142,21 @@ def compute_information_criteria(y_true, y_prob, num_params):
 
 gap = 0.3
 # Load data
-x_train_raw, y_train_raw, x_test_raw, y_test_raw = ad_hoc_data(
-    training_size=N // 2, test_size=N // 2, n=QUBITS, gap=gap, one_hot=False
+x_raw, y_raw, X_test, y_test = ad_hoc_data(
+    training_size=N, test_size=4100 // 2, n=QUBITS, gap=gap, one_hot=False
 )
 
-X_test, y_test, tempx, tempy = ad_hoc_data(
-    training_size=4100 // 2, test_size=0, n=QUBITS, gap=gap, one_hot=False
-)
+# Shuffle 2N training examples
+x_raw, y_raw = shuffle(x_raw, y_raw, random_state=seed)
 
-x = np.vstack([x_train_raw, x_test_raw])
-y = np.hstack([y_train_raw, y_test_raw])
-x, y = shuffle(x, y, random_state=seed)
+# Split into train and validation (each size N)
 x_train, x_val, y_train, y_val = train_test_split(
-    x, y, test_size=0.3, random_state=seed
+    x_raw, y_raw, test_size=0.5, random_state=seed
 )
+
+x = np.vstack([x_raw, x_raw])
+y = np.hstack([y_raw, y_raw])
+x, y = shuffle(x, y, random_state=seed)
 
 
 def compute_test_values(circ, rz, model):

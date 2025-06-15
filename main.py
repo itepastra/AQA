@@ -21,7 +21,7 @@ import pandas as pd
 from collections import Counter
 from pqdm.processes import pqdm
 
-K = 20  # Top circuits to keep per iteration
+K = 1  # Top circuits to keep per iteration
 N = 100  # Data size
 L_MAX = 4  # Max circuit depth
 QUBITS = 3  # Number of qubits
@@ -178,7 +178,7 @@ best_circuit_arr = []
 
 for m in [5, 10, 20, 1, 15, 13, 17, 7, 3]:
     optimal_circuits = []
-    for depth in tqdm(range(1, L_MAX + 1), desc="Depth", position=3, leave=False):
+    for depth in tqdm(range(1, L_MAX + 1), desc="Depth", position=0, leave=False):
         base_circuits = (
             [(c[0], c[1]) for c in optimal_circuits]
             if optimal_circuits
@@ -223,7 +223,7 @@ for m in [5, 10, 20, 1, 15, 13, 17, 7, 3]:
             calculate_combo,
             n_jobs=JOBS,
             desc="Gate Combinations",
-            position=1,
+            position=0,
             leave=False,
         )
         print("finished calculating BICs for circuits")

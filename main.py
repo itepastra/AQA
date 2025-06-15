@@ -185,6 +185,8 @@ for m in [5, 10, 20, 1, 15, 13, 17, 7, 3]:
             else [([tuple(0 for _ in range(QUBITS))], [])]
         )
 
+        print("started calculating next layer")
+
         # Stage 1: Structure search (fixed/random RZ)
         def calculate_combo(inp):
             base, base_rz, combo = inp
@@ -207,7 +209,6 @@ for m in [5, 10, 20, 1, 15, 13, 17, 7, 3]:
                 aic, bic, acc, class_accs, f1 = compute_information_criteria(
                     y_val, y_prob, num_rz
                 )
-                print(f"combo {combo} has BIC {bic}")
                 return (new_circ, dummy_rz, aic, bic, acc, class_accs, f1, model)
             except Exception as e:
                 print(f"Structure error: {e}")
@@ -225,6 +226,7 @@ for m in [5, 10, 20, 1, 15, 13, 17, 7, 3]:
             position=1,
             leave=False,
         )
+        print("finished calculating BICs for circuits")
         stage1_candidates = []
         for thing in result:
             stage1_candidates.append(thing)
@@ -275,26 +277,30 @@ for m in [5, 10, 20, 1, 15, 13, 17, 7, 3]:
                 print(f"Final model error: {e}")
                 return None
 
+        print("started optimisation of circuits")
         stage2_optimized = [
             x
             for x in pqdm(
                 stage1_candidates[:m],
                 parameter_optimization,
                 n_jobs=JOBS,
-                position=2,
+                position=0,
                 leave=False,
                 desc="Optimizing parameters",
             )
             if x is not None
         ]
+        print("finished optimisation of circuits")
 
         # Add remaining K-M circuits (unoptimized) + optimized ones
         optimal_circuits = stage2_optimized + stage1_candidates[m:K]
         optimal_circuits.sort(key=lambda x: x[3])  # sort by BIC
 
+        print("started computing test values")
         aic, bic, acc, class_accs, f1 = compute_test_values(
             optimal_circuits[0][0], optimal_circuits[0][1], optimal_circuits[0][7]
         )
+        print("finished computing test values")
 
         best_circuit_arr.append(
             (optimal_circuits[0] + (m, depth) + (aic, bic, acc, class_accs, f1))

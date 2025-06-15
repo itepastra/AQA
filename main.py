@@ -23,7 +23,7 @@ from pqdm.processes import pqdm
 
 K = 20  # Top circuits to keep per iteration
 N = 100  # Data size
-L_MAX = 5  # Max circuit depth
+L_MAX = 4  # Max circuit depth
 QUBITS = 3  # Number of qubits
 JOBS = 20
 seed = 42
@@ -75,7 +75,7 @@ def create_pennylane_circuit(instructions: List[List[int]]):
                 elif op == 1:
                     qml.Hadamard(wires=qbit)
                 elif op == 2:
-                    qml.RZ(yparams[idx], wires=qbit)
+                    qml.RZ(yparams[idx] * x[qbit], wires=qbit)
                     idx += 1
                 elif op >= 3:
                     qml.CNOT(wires=[qbit, qbit - op + 2])
@@ -86,7 +86,6 @@ def create_pennylane_circuit(instructions: List[List[int]]):
 
 def build_kernel_fn(gate_layers, rz_params):
     dev = qml.device("default.qubit", wires=QUBITS)
-    dev2 = qml.device("default.qubit", wires=QUBITS)
 
     def apply_circuit(x):
         idx = 0
@@ -100,7 +99,7 @@ def build_kernel_fn(gate_layers, rz_params):
                 elif op == 1:
                     qml.Hadamard(wires=qbit)
                 elif op == 2:
-                    qml.RZ(rz_params[idx], wires=qbit)
+                    qml.RZ(rz_params[idx] * x[qbit], wires=qbit)
                     idx += 1
                 elif op >= 3:
                     qml.CNOT(wires=[qbit, qbit - op + 2])
@@ -176,7 +175,7 @@ def compute_test_values(circ, rz, model):
 
 best_circuit_arr = []
 
-for m in [1, 5, 10, 15, 20]:
+for m in [5, 10, 20, 1, 15, 13, 17, 7, 3]:
     optimal_circuits = []
     for depth in tqdm(range(1, L_MAX + 1), desc="Depth", position=3, leave=False):
         base_circuits = (
@@ -231,9 +230,6 @@ for m in [1, 5, 10, 15, 20]:
 
         # Pick top K by BIC
         stage1_candidates.sort(key=lambda x: x[3])
-        param = [cand for cand in stage1_candidates if len(cand[1]) > 0]
-        top_m = param[:m]
-        non_param = [cand for cand in stage1_candidates if len(cand[1]) == 0]
         # Stage 2: Parameter optimization on top M circuits
         stage2_optimized = []
 
@@ -259,7 +255,7 @@ for m in [1, 5, 10, 15, 20]:
                     return 1e6
 
             space = [Real(-np.pi, np.pi) for _ in range(num_rz)]
-            result = gp_minimize(objective, space, n_calls=50, random_state=seed)
+            result = gp_minimize(objective, space, n_calls=15, random_state=seed)
             best_params = result.x
 
             try:
@@ -281,7 +277,7 @@ for m in [1, 5, 10, 15, 20]:
         stage2_optimized = [
             x
             for x in pqdm(
-                top_m,
+                stage1_candidates[:m],
                 parameter_optimization,
                 n_jobs=JOBS,
                 position=2,
@@ -292,9 +288,8 @@ for m in [1, 5, 10, 15, 20]:
         ]
 
         # Add remaining K-M circuits (unoptimized) + optimized ones
-        optimal_circuits = stage2_optimized + non_param[:K] + param[m:]
+        optimal_circuits = stage2_optimized + stage1_candidates[m:K]
         optimal_circuits.sort(key=lambda x: x[3])  # sort by BIC
-        optimal_circuits = optimal_circuits[:K]  # keep top K
 
         aic, bic, acc, class_accs, f1 = compute_test_values(
             optimal_circuits[0][0], optimal_circuits[0][1], optimal_circuits[0][7]

@@ -21,7 +21,7 @@ import pandas as pd
 from collections import Counter
 from pqdm.processes import pqdm
 
-K = 1  # Top circuits to keep per iteration
+K = 20  # Top circuits to keep per iteration
 N = 100  # Data size
 L_MAX = 4  # Max circuit depth
 QUBITS = 3  # Number of qubits

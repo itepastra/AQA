@@ -90,7 +90,7 @@ def create_pennylane_circuit(instructions: List[List[int]]):
                     qml.RY(yparams[idx] * x[qbit], wires=qbit)
                     idx += 1
                 elif op == 5:
-                    qml.CNOT(wires=[qbit, qbit - 1])
+                    qml.CNOT(wires=[qbit, (qbit - 1) % QUBITS])
         return qml.state()
 
     return circuit
@@ -120,7 +120,7 @@ def build_kernel_fn(gate_layers, rz_params):
                     qml.RY(rz_params[idx] * x[qbit], wires=qbit)
                     idx += 1
                 elif op == 5:
-                    qml.CNOT(wires=[qbit, qbit - 1])
+                    qml.CNOT(wires=[qbit, (qbit - 1) % QUBITS])
 
     @qml.qnode(dev)
     def kernel_qnode(x1, x2):
@@ -209,9 +209,12 @@ for m in [5, 10, 20, 1, 15, 13, 17, 7, 3]:
         def calculate_combo(inp):
             base, base_rz, combo = inp
             new_circ = base + [combo]
-            num_rz = sum(layer.count(2) for layer in new_circ)
-            # print(f"Trying circuit {new_circ} with {num_rz} RZs")
-            new_rz_count = combo.count(2)
+            num_rz = (
+                sum(layer.count(2) for layer in new_circ)
+                + sum(layer.count(3) for layer in new_circ)
+                + sum(layer.count(4) for layer in new_circ)
+            )
+            new_rz_count = combo.count(2) + combo.count(3) + combo.count(4)
             new_rz = np.random.uniform(-np.pi, np.pi, size=new_rz_count).tolist()
             dummy_rz = base_rz + new_rz
 
@@ -229,6 +232,7 @@ for m in [5, 10, 20, 1, 15, 13, 17, 7, 3]:
                 )
                 return (new_circ, dummy_rz, aic, bic, acc, class_accs, f1, model)
             except Exception as e:
+                print(f"trying {inp}, new_circ = {new_circ}")
                 print(f"Structure error: {e}")
                 return None
 

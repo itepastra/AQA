@@ -2,7 +2,7 @@
 import itertools
 import json
 import numpy as np
-from typing import List
+from typing import Generator, List
 import pennylane as qml
 from sklearn.svm import SVC
 from sklearn.model_selection import train_test_split
@@ -32,7 +32,9 @@ projector = np.zeros((2**QUBITS, 2**QUBITS))
 projector[0, 0] = 1
 
 
-def gate_combinations_sub(qubits: int, previous_layer: tuple[int]):
+def gate_combinations_sub(
+    qubits: int, previous_layer: tuple[int]
+) -> Generator[tuple[int, ...], None, None]:
     if qubits == 0:
         yield ()
     else:

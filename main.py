@@ -39,12 +39,12 @@ def gate_combinations_sub(
         yield ()
     else:
         for combination in gate_combinations_sub(qubits - 1, previous_layer):
-            yield combination + (0,)
+            yield combination + (0,)  # Identity
             if previous_layer[qubits - 1] != 1:
-                yield combination + (1,)
+                yield combination + (1,)  # Hadamard
             if previous_layer[qubits - 1] != 2:
-                yield combination + (2,)
-            for offset in range(1, len(combination) + 1):
+                yield combination + (2,)  # R_z
+            for offset in range(1, len(combination) + 1):  # CNOT gates
                 if (
                     combination[-offset] == 0
                     and all(

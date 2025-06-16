@@ -32,7 +32,7 @@ def create_pennylane_circuit(instructions: list[list[int]]):
                     qml.RY(yparams[idx] * xparams[qbit], wires=qbit)
                     idx += 1
                 elif op == 5:
-                    qml.CNOT(wires=[qbit, qbit - 1])
+                    qml.CNOT(wires=[qbit, (qbit - 1) % QUBITS])
         return qml.state()
 
     return circuit
@@ -40,7 +40,6 @@ def create_pennylane_circuit(instructions: list[list[int]]):
 
 matplotlib.use("tkagg")
 
-circ = create_pennylane_circuit([[0, 0, 0]])
-print(qml.draw(circ([1, 2, 3])))
-fig, ax = qml.draw_mpl(circ)([1, 2, 3])
+circ = create_pennylane_circuit([[1, 1, 1], [2, 2, 2], [3, 3, 3], [4, 4, 4], [5, 5, 5]])
+fig, ax = qml.draw_mpl(circ)([1, 2, 3], [1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3])
 plt.show()

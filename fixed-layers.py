@@ -2,7 +2,7 @@
 import itertools
 import json
 import numpy as np
-from typing import Generator, List
+from typing import List
 import pennylane as qml
 from sklearn.svm import SVC
 from sklearn.model_selection import train_test_split
@@ -32,19 +32,17 @@ projector = np.zeros((2**QUBITS, 2**QUBITS))
 projector[0, 0] = 1
 
 
-def gate_combinations_sub(
-    qubits: int, previous_layer: tuple[int]
-) -> Generator[tuple[int, ...], None, None]:
+def gate_combinations_sub(qubits: int, previous_layer: tuple[int]):
     if qubits == 0:
         yield ()
     else:
         for combination in gate_combinations_sub(qubits - 1, previous_layer):
-            yield combination + (0,)  # Identity
+            yield combination + (0,)
             if previous_layer[qubits - 1] != 1:
-                yield combination + (1,)  # Hadamard
+                yield combination + (1,)
             if previous_layer[qubits - 1] != 2:
-                yield combination + (2,)  # R_z
-            for offset in range(1, len(combination) + 1):  # CNOT gates
+                yield combination + (2,)
+            for offset in range(1, len(combination) + 1):
                 if (
                     combination[-offset] == 0
                     and all(
@@ -56,8 +54,14 @@ def gate_combinations_sub(
 
 
 def gate_combinations(qubits, previous_layer):
-    # skip the 1st output (0 everywhere) so we actually do
-    return list(gate_combinations_sub(qubits, previous_layer))[1:]
+    for combination in [
+        tuple(1 for _ in range(qubits)),  # all hadamard
+        tuple(2 for _ in range(qubits)),  # all RZ
+        tuple(3 for _ in range(qubits)),  # all RX
+        tuple(4 for _ in range(qubits)),  # all RY
+        tuple(5 for _ in range(qubits)),  # cyclic CNOT
+    ]:
+        yield combination
 
 
 def create_pennylane_circuit(instructions: List[List[int]]):
@@ -79,8 +83,14 @@ def create_pennylane_circuit(instructions: List[List[int]]):
                 elif op == 2:
                     qml.RZ(yparams[idx] * x[qbit], wires=qbit)
                     idx += 1
-                elif op >= 3:
-                    qml.CNOT(wires=[qbit, qbit - op + 2])
+                elif op == 3:
+                    qml.RX(yparams[idx] * x[qbit], wires=qbit)
+                    idx += 1
+                elif op == 4:
+                    qml.RY(yparams[idx] * x[qbit], wires=qbit)
+                    idx += 1
+                elif op == 5:
+                    qml.CNOT(wires=[qbit, (qbit - 1) % QUBITS])
         return qml.state()
 
     return circuit
@@ -103,8 +113,14 @@ def build_kernel_fn(gate_layers, rz_params):
                 elif op == 2:
                     qml.RZ(rz_params[idx] * x[qbit], wires=qbit)
                     idx += 1
-                elif op >= 3:
-                    qml.CNOT(wires=[qbit, qbit - op + 2])
+                elif op == 3:
+                    qml.RX(rz_params[idx] * x[qbit], wires=qbit)
+                    idx += 1
+                elif op == 4:
+                    qml.RY(rz_params[idx] * x[qbit], wires=qbit)
+                    idx += 1
+                elif op == 5:
+                    qml.CNOT(wires=[qbit, (qbit - 1) % QUBITS])
 
     @qml.qnode(dev)
     def kernel_qnode(x1, x2):
@@ -193,9 +209,12 @@ for m in [5, 10, 20, 1, 15, 13, 17, 7, 3]:
         def calculate_combo(inp):
             base, base_rz, combo = inp
             new_circ = base + [combo]
-            num_rz = sum(layer.count(2) for layer in new_circ)
-            # print(f"Trying circuit {new_circ} with {num_rz} RZs")
-            new_rz_count = combo.count(2)
+            num_rz = (
+                sum(layer.count(2) for layer in new_circ)
+                + sum(layer.count(3) for layer in new_circ)
+                + sum(layer.count(4) for layer in new_circ)
+            )
+            new_rz_count = combo.count(2) + combo.count(3) + combo.count(4)
             new_rz = np.random.uniform(-np.pi, np.pi, size=new_rz_count).tolist()
             dummy_rz = base_rz + new_rz
 
@@ -213,6 +232,7 @@ for m in [5, 10, 20, 1, 15, 13, 17, 7, 3]:
                 )
                 return (new_circ, dummy_rz, aic, bic, acc, class_accs, f1, model)
             except Exception as e:
+                print(f"trying {inp}, new_circ = {new_circ}")
                 print(f"Structure error: {e}")
                 return None
 
